@@ -83,7 +83,7 @@ fn should_be_present(cmd string) {
 }
 
 fn main() {
-	should_be_present('mpg321')
+	should_be_present('mpv')
 	should_be_present('wget')
 	unbuffer_stdout()
 	os.mkdir_all(song_local_dir) or {}
@@ -95,9 +95,7 @@ fn main() {
 	for {
 		song := <-app.downloaded
 		println('Playing "${song.title}" from URL: ${song.url:-40s} ...')
-		//		res := os.system('mpv --no-audio-display ${song.local_path()}')
-		res := os.system('mpg321 --quiet ${song.local_path()}')
-		dump(res)
+		res := os.system('mpv --no-audio-display ${song.local_path()}')
 		if res == 4 {
 			eprintln('mpv was interrupted by Ctrl-C. Good bye.')
 			exit(1)
