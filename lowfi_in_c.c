@@ -51,7 +51,6 @@ typedef struct DownloadTask {
 static char *song_local_dir = NULL;
 static SongVec songs = {0};
 static int song_counter = 0;
-static pthread_mutex_t song_counter_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void die(const char *msg) {
     perror(msg);
@@ -262,7 +261,6 @@ static bool has_executable(const char *cmd) {
     if (!path) {
         return false;
     }
-
     const char *segment = path;
     while (true) {
         const char *end = strchr(segment, ':');
@@ -274,13 +272,11 @@ static bool has_executable(const char *cmd) {
         memcpy(candidate, dir, dir_len);
         candidate[dir_len] = '/';
         memcpy(candidate + dir_len + 1, cmd, cmd_len + 1);
-
         bool ok = access(candidate, X_OK) == 0;
         free(candidate);
         if (ok) {
             return true;
         }
-
         if (!end) {
             break;
         }
@@ -301,12 +297,10 @@ static int run_command(char *const argv[]) {
     if (pid < 0) {
         return -1;
     }
-
     if (pid == 0) {
         execvp(argv[0], argv);
         _exit(127);
     }
-
     int status = 0;
     if (waitpid(pid, &status, 0) < 0) {
         return -1;
@@ -332,10 +326,10 @@ static int wget_file(const char *url, const char *output_path) {
     return run_command(argv);
 }
 
-static int mpg321_file(const char *path) {
+static int mpv_file(const char *path) {
     char *const argv[] = {
-        (char *)"mpg321",
-        (char *)"--quiet",
+        (char *)"mpv",
+        (char *)"--no-audio-display",
         (char *)path,
         NULL,
     };
@@ -356,7 +350,6 @@ static void download_local_file(App *app, Song osong, int counter) {
         .title = osong.title,
         .number = counter,
     };
-
     char *lpath = song_local_path(&song);
     if (access(lpath, F_OK) != 0) {
         for (int i = 0; i < 5; ++i) {
@@ -396,16 +389,11 @@ static void add_random_song(App *app) {
     if (!song.url) {
         return;
     }
-
-    pthread_mutex_lock(&song_counter_mutex);
     int counter = ++song_counter;
-    pthread_mutex_unlock(&song_counter_mutex);
-
     DownloadTask *task = xmalloc(sizeof(*task));
     task->song = song;
     task->counter = counter;
     task->app = app;
-
     pthread_t thread;
     if (pthread_create(&thread, NULL, download_local_file_thread, task) != 0) {
         download_local_file(app, song, counter);
@@ -422,33 +410,26 @@ static void add_another(App *app, Song song) {
 
 int main(void) {
     srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
-    should_be_present("mpg321");
     should_be_present("wget");
-
+    should_be_present("mpv");
     setvbuf(stdout, NULL, _IONBF, 0);
-
     song_local_dir = build_song_local_dir();
     if (mkdir(song_local_dir, 0755) != 0 && errno != EEXIST) {
         die("mkdir");
     }
     printf("Local folder: %s\n", song_local_dir);
-
     songs = create_songs();
-
     App app = {0};
     queue_init(&app.downloaded, 5);
-
     for (int i = 0; i < 5; ++i) {
         add_random_song(&app);
     }
-
     for (;;) {
         Song song = queue_pop(&app.downloaded);
         printf("Playing \"%s\" from URL: %-40s ...\n", song.title, song.url);
         char *path = song_local_path(&song);
-        int res = mpg321_file(path);
+        int res = mpv_file(path);
         free(path);
-        printf("res: %d\n", res);
         if (res == 4) {
             fprintf(stderr, "mpv was interrupted by Ctrl-C. Good bye.\n");
             exit(1);
