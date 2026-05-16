@@ -15,6 +15,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "chillhop_embedded.h"
+
 typedef struct Song {
     char *url;
     char *title;
@@ -87,14 +89,6 @@ static char *xstrndup(const char *s, size_t n) {
     return out;
 }
 
-static char *trim_line(char *line) {
-    size_t len = strlen(line);
-    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
-        line[--len] = '\0';
-    }
-    return line;
-}
-
 static char *join_path(const char *left, const char *right) {
     size_t left_len = strlen(left);
     size_t right_len = strlen(right);
@@ -160,42 +154,52 @@ static Song new_song(const char *line) {
     return song;
 }
 
-static SongVec create_songs(void) {
-    FILE *fp = fopen("chillhop.txt", "r");
-    if (!fp) {
-        die("fopen chillhop.txt");
+static char *copy_trimmed_line(const unsigned char *start, size_t len) {
+    while (len > 0 && (start[len - 1] == '\n' || start[len - 1] == '\r')) {
+        --len;
     }
+    char *line = xmalloc(len + 1);
+    memcpy(line, start, len);
+    line[len] = '\0';
+    return line;
+}
 
+static SongVec create_songs_from_bytes(const unsigned char *data, size_t len) {
     SongVec vec = {0};
-    char *line = NULL;
-    size_t line_cap = 0;
-    ssize_t nread;
     char *baseurl = NULL;
 
-    while ((nread = getline(&line, &line_cap, fp)) != -1) {
-        (void)nread;
-        trim_line(line);
-        if (!baseurl) {
-            baseurl = xstrdup(line);
-            continue;
-        }
-        if (line[0] == '\0') {
+    size_t start = 0;
+    for (size_t i = 0; i <= len; ++i) {
+        if (i < len && data[i] != '\n') {
             continue;
         }
 
-        size_t full_len = strlen(baseurl) + strlen(line);
-        char *full = xmalloc(full_len + 1);
-        memcpy(full, baseurl, strlen(baseurl));
-        memcpy(full + strlen(baseurl), line, strlen(line));
-        full[full_len] = '\0';
-        song_vec_push(&vec, new_song(full));
-        free(full);
+        char *line = copy_trimmed_line(data + start, i - start);
+        if (!baseurl) {
+            baseurl = line;
+        } else if (line[0] != '\0') {
+            size_t base_len = strlen(baseurl);
+            size_t line_len = strlen(line);
+            size_t full_len = base_len + line_len;
+            char *full = xmalloc(full_len + 1);
+            memcpy(full, baseurl, base_len);
+            memcpy(full + base_len, line, line_len);
+            full[full_len] = '\0';
+            song_vec_push(&vec, new_song(full));
+            free(full);
+            free(line);
+        } else {
+            free(line);
+        }
+        start = i + 1;
     }
 
     free(baseurl);
-    free(line);
-    fclose(fp);
     return vec;
+}
+
+static SongVec create_songs(void) {
+    return create_songs_from_bytes(chillhop_txt, sizeof(chillhop_txt));
 }
 
 static void queue_init(SongQueue *q, size_t cap) {
